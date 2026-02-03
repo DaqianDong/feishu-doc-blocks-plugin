@@ -82,6 +82,12 @@ body {
   font-size: 13px;
 }
 
+.unfriendly-count {
+  color: #cf1322;
+  font-weight: 700;
+  font-size: 15px;
+}
+
 .no-data {
   color: #999;
   font-style: italic;

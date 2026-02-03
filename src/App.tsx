@@ -16,20 +16,40 @@ const isTextualBlock = (block: BlockSnapshot) => {
   );
 };
 
-// 获取文档字数
+// 获取文档字数（分别统计友好块和不友好块）
 const getDocumentWordCount = async (docRef: DocumentRef) => {
   const blockSnapshot = await DocMiniApp.Document.getRootBlock(docRef);
-  let number = 0;
-  const getBlockWordCount = async (blockSnapshot: BlockSnapshot): Promise<void> => {
-    if (isTextualBlock(blockSnapshot)) {
-      number = number + blockSnapshot.data?.plain_text?.length;
+  let friendlyCount = 0;
+  let unfriendlyCount = 0;
+
+  const traverseBlocks = async (block: BlockSnapshot): Promise<void> => {
+    // 忽略的块类型不统计
+    if (IGNORED_BLOCK_TYPES.includes(block.type)) {
+      for (const childSnapshot of block.childSnapshots) {
+        await traverseBlocks(childSnapshot);
+      }
+      return;
     }
-    for (const blockChildSnapshot of blockSnapshot.childSnapshots) {
-      await getBlockWordCount(blockChildSnapshot);
+
+    const normalizedType = normalizeBlockType(block.type);
+    const isUnfriendly = UNFRIENDLY_BLOCK_TYPES.includes(normalizedType);
+
+    if (isTextualBlock(block)) {
+      const textLength = block.data?.plain_text?.length || 0;
+      if (isUnfriendly) {
+        unfriendlyCount += textLength;
+      } else {
+        friendlyCount += textLength;
+      }
+    }
+
+    for (const blockChildSnapshot of block.childSnapshots) {
+      await traverseBlocks(blockChildSnapshot);
     }
   };
-  await getBlockWordCount(blockSnapshot);
-  return number;
+
+  await traverseBlocks(blockSnapshot);
+  return { friendly: friendlyCount, unfriendly: unfriendlyCount, total: friendlyCount + unfriendlyCount };
 };
 
 // 估算 Token 数量
@@ -46,24 +66,46 @@ const estimateTokenCount = (text: string): number => {
   return Math.ceil(chineseChars * 0.5 + englishWords * 1.33 + otherChars);
 };
 
-// 获取文档 Token 数量
+// 获取文档 Token 数量（分别统计友好块和不友好块）
 const getDocumentTokenCount = async (docRef: DocumentRef) => {
   const blockSnapshot = await DocMiniApp.Document.getRootBlock(docRef);
-  let totalTokens = 0;
-  let fullText = '';
+  let friendlyText = '';
+  let unfriendlyText = '';
 
-  const collectText = async (blockSnapshot: BlockSnapshot): Promise<void> => {
-    if (isTextualBlock(blockSnapshot) && blockSnapshot.data?.plain_text) {
-      fullText += blockSnapshot.data.plain_text;
+  const traverseBlocks = async (block: BlockSnapshot): Promise<void> => {
+    // 忽略的块类型不统计
+    if (IGNORED_BLOCK_TYPES.includes(block.type)) {
+      for (const childSnapshot of block.childSnapshots) {
+        await traverseBlocks(childSnapshot);
+      }
+      return;
     }
-    for (const blockChildSnapshot of blockSnapshot.childSnapshots) {
-      await collectText(blockChildSnapshot);
+
+    const normalizedType = normalizeBlockType(block.type);
+    const isUnfriendly = UNFRIENDLY_BLOCK_TYPES.includes(normalizedType);
+
+    if (isTextualBlock(block) && blockSnapshot.data?.plain_text) {
+      if (isUnfriendly) {
+        unfriendlyText += blockSnapshot.data.plain_text;
+      } else {
+        friendlyText += blockSnapshot.data.plain_text;
+      }
+    }
+
+    for (const blockChildSnapshot of block.childSnapshots) {
+      await traverseBlocks(blockChildSnapshot);
     }
   };
 
-  await collectText(blockSnapshot);
-  totalTokens = estimateTokenCount(fullText);
-  return totalTokens;
+  await traverseBlocks(blockSnapshot);
+
+  const friendlyTokens = estimateTokenCount(friendlyText);
+  const unfriendlyTokens = estimateTokenCount(unfriendlyText);
+  return {
+    friendly: friendlyTokens,
+    unfriendly: unfriendlyTokens,
+    total: friendlyTokens + unfriendlyTokens
+  };
 };
 
 // 块类型统计结果接口
@@ -73,7 +115,7 @@ interface BlockCountResult {
 }
 
 // 需要忽略的块类型
-const IGNORED_BLOCK_TYPES = ['page'];
+const IGNORED_BLOCK_TYPES = ['page', 'table_cell', 'grid_column', 'grid'];
 
 // 议程相关块类型映射
 const AGENDA_BLOCK_TYPES = ['agenda', 'agenda_item', 'agenda_item_title', 'agenda_item_content'];
@@ -81,20 +123,28 @@ const AGENDA_BLOCK_TYPES = ['agenda', 'agenda_item', 'agenda_item_title', 'agend
 // OKR相关块类型映射
 const OKR_BLOCK_TYPES = ['okr', 'okr_objective', 'okr_key_result', 'okr_progress'];
 
-// 不友好标题块类型
+// 友好标题块类型（1~5级）
+const FRIENDLY_HEADING_TYPES = ['heading1', 'heading2', 'heading3', 'heading4', 'heading5'];
+
+// 不友好标题块类型（6~9级）
 const UNFRIENDLY_HEADING_TYPES = ['heading6', 'heading7', 'heading8', 'heading9'];
+
+// 列表块类型（有序和无序）
+const LIST_BLOCK_TYPES = [BlockType.BULLET, BlockType.ORDERED];
 
 // 统一块类型名称
 const normalizeBlockType = (type: string): string => {
   if (AGENDA_BLOCK_TYPES.includes(type)) return 'agenda';
   if (OKR_BLOCK_TYPES.includes(type)) return 'okr';
-  if (UNFRIENDLY_HEADING_TYPES.includes(type)) return 'heading';
+  if (FRIENDLY_HEADING_TYPES.includes(type)) return 'heading';
+  if (UNFRIENDLY_HEADING_TYPES.includes(type)) return 'unfriendly_heading';
+  if (LIST_BLOCK_TYPES.includes(type as BlockType)) return 'list';
   return type;
 };
 
 // 不友好块类型列表
 const UNFRIENDLY_BLOCK_TYPES = [
-  'heading',
+  'unfriendly_heading',
   'iframe', 'isv', 'task', 'okr',
   'whiteboard', 'agenda',
   'ai_template', 'undefined'
@@ -189,18 +239,19 @@ const getPageBlocksInfo = async (docRef: DocumentRef): Promise<PageBlockInfo[]> 
 const getBlockTypeName = (type: string): string => {
   const typeNames: Record<string, string> = {
     [BlockType.TEXT]: '文本',
-    [BlockType.HEADING1]: '一级标题',
-    [BlockType.HEADING2]: '二级标题',
-    [BlockType.HEADING3]: '三级标题',
-    [BlockType.HEADING4]: '四级标题',
-    [BlockType.HEADING5]: '五级标题',
-    [BlockType.HEADING6]: '六级标题',
-    [BlockType.HEADING7]: '七级标题',
-    [BlockType.HEADING8]: '八级标题',
-    [BlockType.HEADING9]: '九级标题',
-    [BlockType.BULLET]: '无序列表',
-    [BlockType.ORDERED]: '有序列表',
+    [BlockType.HEADING1]: '标题',
+    [BlockType.HEADING2]: '标题',
+    [BlockType.HEADING3]: '标题',
+    [BlockType.HEADING4]: '标题',
+    [BlockType.HEADING5]: '标题',
+    [BlockType.HEADING6]: '标题',
+    [BlockType.HEADING7]: '标题',
+    [BlockType.HEADING8]: '标题',
+    [BlockType.HEADING9]: '标题',
+    [BlockType.BULLET]: '列表',
+    [BlockType.ORDERED]: '列表',
     [BlockType.QUOTE]: '引用',
+    'list': '列表（包含有序、无序列表）',
     [BlockType.TODO]: '待办',
     [BlockType.CODE]: '代码块',
     [BlockType.DIVIDER]: '分割线',
@@ -226,7 +277,8 @@ const getBlockTypeName = (type: string): string => {
     [BlockType.FLOW]: '流程',
     [BlockType.CHART]: '图表',
     // 不友好块类型
-    'heading': '不友好标题（包含6~9级标题）',
+    'heading': '标题（包含1~5级标题）',
+    'unfriendly_heading': '不友好标题（包含6~9级标题）',
     'iframe': '内嵌网页',
     'isv': '云文档小组件',
     'task': '任务',
@@ -239,9 +291,23 @@ const getBlockTypeName = (type: string): string => {
   return typeNames[type] || type;
 };
 
+// 字数统计结果接口
+interface WordCountResult {
+  friendly: number;
+  unfriendly: number;
+  total: number;
+}
+
+// Token统计结果接口
+interface TokenCountResult {
+  friendly: number;
+  unfriendly: number;
+  total: number;
+}
+
 export default () => {
-  const [wordCount, setWordCount] = useState<number>(0);
-  const [tokenCount, setTokenCount] = useState<number>(0);
+  const [wordCount, setWordCount] = useState<WordCountResult>({ friendly: 0, unfriendly: 0, total: 0 });
+  const [tokenCount, setTokenCount] = useState<TokenCountResult>({ friendly: 0, unfriendly: 0, total: 0 });
   const [blockStats, setBlockStats] = useState<BlockCountResult | null>(null);
   const [pageBlocks, setPageBlocks] = useState<PageBlockInfo[]>([]);
   const interval = useRef<number>(new Date().getTime());
@@ -249,14 +315,14 @@ export default () => {
 
   // 计算字数
   const computeWordCount = useCallback(async (docRef: DocumentRef) => {
-    const number = await getDocumentWordCount(docRef);
-    setWordCount(number);
+    const result = await getDocumentWordCount(docRef);
+    setWordCount(result);
   }, []);
 
   // 计算 Token 数量
   const computeTokenCount = useCallback(async (docRef: DocumentRef) => {
-    const tokens = await getDocumentTokenCount(docRef);
-    setTokenCount(tokens);
+    const result = await getDocumentTokenCount(docRef);
+    setTokenCount(result);
   }, []);
 
   // 计算块统计
@@ -308,28 +374,32 @@ export default () => {
         <div className="app-name">Sofunny 飞书云文档检查器</div>
         <div className="header-stats">
           <span className="stat-item">
-            文档字数：<span className="count">{wordCount}</span>
+            文档字数：<span className="count">{wordCount.total}</span>
           </span>
           <span className="stat-item">
-            预估 Token：<span className="count">{tokenCount}</span>
+            预估 Token：<span className="count">{tokenCount.total}</span>
           </span>
         </div>
       </div>
 
       {/* 统计结果分栏显示 */}
       <div className="stats-columns">
-        {/* 左侧：块统计 */}
+        {/* 左侧：友好块 */}
         {blockStats && (
           <div className="stats-column block-stats">
-            <h3>块统计：{blockStats.total}</h3>
+            <h3>友好块：{Object.entries(blockStats.byType).filter(([type]) => !UNFRIENDLY_BLOCK_TYPES.includes(type)).reduce((sum, [, count]) => sum + count, 0)}</h3>
             <ul className="block-list">
               {Object.entries(blockStats.byType)
+                .filter(([type]) => !UNFRIENDLY_BLOCK_TYPES.includes(type))
                 .sort(([, a], [, b]) => b - a)
                 .map(([type, count]) => (
                   <li key={type}>
                     {getBlockTypeName(type)}: <span className="count">{count}</span>
                   </li>
                 ))}
+              {Object.keys(blockStats.byType).filter(type => !UNFRIENDLY_BLOCK_TYPES.includes(type)).length === 0 && (
+                <li className="no-data">无</li>
+              )}
             </ul>
           </div>
         )}
