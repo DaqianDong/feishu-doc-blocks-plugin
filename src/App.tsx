@@ -387,40 +387,48 @@ export default () => {
         {/* 左侧：友好块 */}
         {blockStats && (
           <div className="stats-column block-stats">
-            <h3>友好块：{Object.entries(blockStats.byType).filter(([type]) => !UNFRIENDLY_BLOCK_TYPES.includes(type)).reduce((sum, [, count]) => sum + count, 0)}</h3>
-            <ul className="block-list">
-              {Object.entries(blockStats.byType)
-                .filter(([type]) => !UNFRIENDLY_BLOCK_TYPES.includes(type))
-                .sort(([, a], [, b]) => b - a)
-                .map(([type, count]) => (
-                  <li key={type}>
-                    {getBlockTypeName(type)}: <span className="count">{count}</span>
-                  </li>
-                ))}
-              {Object.keys(blockStats.byType).filter(type => !UNFRIENDLY_BLOCK_TYPES.includes(type)).length === 0 && (
-                <li className="no-data">无</li>
-              )}
-            </ul>
+            <div className="stats-header">
+              <h3>友好块：{Object.entries(blockStats.byType).filter(([type]) => !UNFRIENDLY_BLOCK_TYPES.includes(type)).reduce((sum, [, count]) => sum + count, 0)}</h3>
+            </div>
+            <div className="stats-body">
+              <ul className="block-list">
+                {Object.entries(blockStats.byType)
+                  .filter(([type]) => !UNFRIENDLY_BLOCK_TYPES.includes(type))
+                  .sort(([, a], [, b]) => b - a)
+                  .map(([type, count]) => (
+                    <li key={type}>
+                      {getBlockTypeName(type)}: <span className="count">{count}</span>
+                    </li>
+                  ))}
+                {Object.keys(blockStats.byType).filter(type => !UNFRIENDLY_BLOCK_TYPES.includes(type)).length === 0 && (
+                  <li className="no-data">无</li>
+                )}
+              </ul>
+            </div>
           </div>
         )}
 
         {/* 右侧：不友好块 */}
         {blockStats && (
           <div className="stats-column page-blocks">
-            <h3>不友好块：{Object.entries(blockStats.byType).filter(([type]) => UNFRIENDLY_BLOCK_TYPES.includes(type)).reduce((sum, [, count]) => sum + count, 0)}</h3>
-            <ul className="block-list">
-              {Object.entries(blockStats.byType)
-                .filter(([type]) => UNFRIENDLY_BLOCK_TYPES.includes(type))
-                .sort(([, a], [, b]) => b - a)
-                .map(([type, count]) => (
-                  <li key={type}>
-                    {getBlockTypeName(type)}: <span className="count">{count}</span>
-                  </li>
-                ))}
-              {Object.keys(blockStats.byType).filter(type => UNFRIENDLY_BLOCK_TYPES.includes(type)).length === 0 && (
-                <li className="no-data">无</li>
-              )}
-            </ul>
+            <div className="stats-header">
+              <h3>不友好块：{Object.entries(blockStats.byType).filter(([type]) => UNFRIENDLY_BLOCK_TYPES.includes(type)).reduce((sum, [, count]) => sum + count, 0)}</h3>
+            </div>
+            <div className="stats-body">
+              <ul className="block-list">
+                {Object.entries(blockStats.byType)
+                  .filter(([type]) => UNFRIENDLY_BLOCK_TYPES.includes(type))
+                  .sort(([, a], [, b]) => b - a)
+                  .map(([type, count]) => (
+                    <li key={type}>
+                      {getBlockTypeName(type)}: <span className="count">{count}</span>
+                    </li>
+                  ))}
+                {Object.keys(blockStats.byType).filter(type => UNFRIENDLY_BLOCK_TYPES.includes(type)).length === 0 && (
+                  <li className="no-data">无</li>
+                )}
+              </ul>
+            </div>
           </div>
         )}
       </div>

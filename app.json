@@ -6,7 +6,7 @@
   "projectName": "doc-ap-plugins",
   "contributes": {
     "addPanel": {
-      "initialHeight": 500,
+      "initialHeight": 400,
       "view": "index.html"
     }
   },
