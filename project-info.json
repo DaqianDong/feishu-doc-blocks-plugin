@@ -1,0 +1,47 @@
+{
+  "name": "飞书云文档检查器插件",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:DaqianDong/feishu-doc-blocks-plugin.git"
+  },
+  "version": "1.0.0",
+  "releaseDate": "2025-02-24",
+  "description": "一个功能强大的飞书云文档插件，实时统计文档内容，帮助作者了解文档结构和质量",
+  "author": "Daqian Dong",
+  "license": "MIT",
+  "homepage": "https://github.com/DaqianDong/feishu-doc-blocks-plugin",
+  "bugs": "https://github.com/DaqianDong/feishu-doc-blocks-plugin/issues",
+  "tags": [
+    "feishu",
+    "lark",
+    "document",
+    "plugin",
+    "word-count",
+    "token-counter",
+    "block-analyzer"
+  ],
+  "features": [
+    "文档字数统计",
+    "Token 估算",
+    "块类型智能分类",
+    "表格统计和跳转",
+    "问题块快速定位",
+    "折叠式 UI 设计",
+    "版本号显示"
+  ],
+  "techStack": [
+    "React 18",
+    "TypeScript",
+    "Webpack 5",
+    "飞书开放平台 API"
+  ],
+  "releases": [
+    {
+      "version": "1.0.0",
+      "date": "2025-02-24",
+      "tag": "v1.0.0",
+      "description": "首个稳定版本",
+      "commit": "fbaee16a"
+    }
+  ]
+}
