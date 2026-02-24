@@ -125,6 +125,37 @@ body {
   font-weight: 600;
 }
 
+.stats-column .stats-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.stats-column .stats-header h3 {
+  flex: 1;
+}
+
+.scroll-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #fff;
+  background-color: #cf1322;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.scroll-btn:hover {
+  background-color: #a8071a;
+}
+
+.scroll-btn:active {
+  background-color: #820014;
+}
+
 .stats-column.block-stats .stats-header h3 {
   color: #333;
 }

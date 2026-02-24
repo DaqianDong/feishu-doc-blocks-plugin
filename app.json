@@ -5,9 +5,11 @@
   "blockTypeID": "blk_6980778c874e0cdb22524522",
   "projectName": "doc-ap-plugins",
   "contributes": {
-    "addPanel": {
-      "initialHeight": 400,
-      "view": "index.html"
+    "topbar": {
+      "initialHeight": 350,
+      "initialWidth": 500,
+      "view": "index.html",
+      "minify": true
     }
   },
   "url": "https://sofunny.feishu.cn/docx/Rsy9dTzzSoKL4mxW5dFcH4IknDe"

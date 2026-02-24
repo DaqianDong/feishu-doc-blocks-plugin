@@ -235,6 +235,34 @@ const getPageBlocksInfo = async (docRef: DocumentRef): Promise<PageBlockInfo[]> 
   return pageBlocks;
 };
 
+// 获取所有不友好块的 ID 列表
+const getUnfriendlyBlockIds = async (docRef: DocumentRef): Promise<string[]> => {
+  const blockSnapshot = await DocMiniApp.Document.getRootBlock(docRef);
+  const unfriendlyIds: string[] = [];
+
+  const traverseBlocks = async (block: BlockSnapshot): Promise<void> => {
+    // 忽略的块类型跳过
+    if (IGNORED_BLOCK_TYPES.includes(block.type)) {
+      for (const childSnapshot of block.childSnapshots) {
+        await traverseBlocks(childSnapshot);
+      }
+      return;
+    }
+
+    const normalizedType = normalizeBlockType(block.type);
+    if (UNFRIENDLY_BLOCK_TYPES.includes(normalizedType)) {
+      unfriendlyIds.push(block.id);
+    }
+
+    for (const childSnapshot of block.childSnapshots) {
+      await traverseBlocks(childSnapshot);
+    }
+  };
+
+  await traverseBlocks(blockSnapshot);
+  return unfriendlyIds;
+};
+
 // 获取块类型的中文名称
 const getBlockTypeName = (type: string): string => {
   const typeNames: Record<string, string> = {
@@ -310,8 +338,10 @@ export default () => {
   const [tokenCount, setTokenCount] = useState<TokenCountResult>({ friendly: 0, unfriendly: 0, total: 0 });
   const [blockStats, setBlockStats] = useState<BlockCountResult | null>(null);
   const [pageBlocks, setPageBlocks] = useState<PageBlockInfo[]>([]);
+  const [currentUnfriendlyIndex, setCurrentUnfriendlyIndex] = useState<number>(0);
   const interval = useRef<number>(new Date().getTime());
   const docRef = useRef<DocumentRef>(null);
+  const unfriendlyBlockIds = useRef<string[]>([]);
 
   // 计算字数
   const computeWordCount = useCallback(async (docRef: DocumentRef) => {
@@ -337,6 +367,18 @@ export default () => {
     setPageBlocks(pages);
   }, []);
 
+  // 跳转到下一个不友好块
+  const scrollToNextUnfriendly = useCallback(async () => {
+    if (!docRef.current || unfriendlyBlockIds.current.length === 0) return;
+
+    const currentId = unfriendlyBlockIds.current[currentUnfriendlyIndex];
+    const blockRef = await DocMiniApp.getBlockRefById(docRef.current, currentId);
+    DocMiniApp.Viewport.scrollToBlock(blockRef, true);
+
+    // 下一个，循环
+    setCurrentUnfriendlyIndex((prev) => (prev + 1) % unfriendlyBlockIds.current.length);
+  }, [currentUnfriendlyIndex]);
+
   const INTERVAL = 16;
 
   useEffect(() => {
@@ -359,6 +401,8 @@ export default () => {
       computeTokenCount(docRef.current);
       computeBlockStats(docRef.current);
       computePageBlocks(docRef.current);
+      // 获取不友好块ID列表
+      unfriendlyBlockIds.current = await getUnfriendlyBlockIds(docRef.current);
     })();
     return () => {
       (async () => {
@@ -413,6 +457,9 @@ export default () => {
           <div className="stats-column page-blocks">
             <div className="stats-header">
               <h3>不友好块：{Object.entries(blockStats.byType).filter(([type]) => UNFRIENDLY_BLOCK_TYPES.includes(type)).reduce((sum, [, count]) => sum + count, 0)}</h3>
+              <button className="scroll-btn" onClick={scrollToNextUnfriendly}>
+                跳转
+              </button>
             </div>
             <div className="stats-body">
               <ul className="block-list">
