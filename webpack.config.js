@@ -1,4 +1,5 @@
 const path = require('path');
+const webpack = require('webpack');
 const ReactRefreshWebpackPlugin = require('@pmmmwh/react-refresh-webpack-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const { ESBuildMinifyPlugin } = require('esbuild-loader');
@@ -8,6 +9,7 @@ const {
   docsAddonDevMiddleware,
   docsAddonWebpackPlugin,
 } = require('@lark-opdev/block-docs-addon-webpack-utils');
+const packageJson = require('./package.json');
 
 const cwd = process.cwd();
 const isDevelopment = process.env.NODE_ENV === 'development';
@@ -83,6 +85,9 @@ const config = {
       filename: 'index.html',
       template: './src/index.html',
       publicPath: isDevelopment ? '/block/' : './',
+    }),
+    new webpack.DefinePlugin({
+      'process.env.APP_VERSION': JSON.stringify(packageJson.version)
     }),
   ],
   resolve: {

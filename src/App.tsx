@@ -2,6 +2,9 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { BlockitClient, BlockType, BlockSnapshot, DocumentRef } from '@lark-opdev/block-docs-addon-api';
 import './index.css';
 
+// 声明版本号类型
+declare const APP_VERSION: string;
+
 const DocMiniApp = new BlockitClient().initAPI();
 
 // 判断是否为文本类块
@@ -16,7 +19,7 @@ const isTextualBlock = (block: BlockSnapshot) => {
   );
 };
 
-// 获取文档字数（分别统计友好块和不友好块）
+// 获取文档字数（分别统计友好块和问题块）
 const getDocumentWordCount = async (docRef: DocumentRef) => {
   const blockSnapshot = await DocMiniApp.Document.getRootBlock(docRef);
   let friendlyCount = 0;
@@ -66,7 +69,7 @@ const estimateTokenCount = (text: string): number => {
   return Math.ceil(chineseChars * 0.5 + englishWords * 1.33 + otherChars);
 };
 
-// 获取文档 Token 数量（分别统计友好块和不友好块）
+// 获取文档 Token 数量（分别统计友好块和问题块）
 const getDocumentTokenCount = async (docRef: DocumentRef) => {
   const blockSnapshot = await DocMiniApp.Document.getRootBlock(docRef);
   let friendlyText = '';
@@ -147,7 +150,7 @@ const UNFRIENDLY_BLOCK_TYPES = [
   'unfriendly_heading',
   'iframe', 'isv', 'task', 'okr',
   'whiteboard', 'agenda',
-  'ai_template', 'undefined'
+  'ai_template', 'fallback', 'undefined'
 ];
 
 // 页面块信息接口
@@ -235,7 +238,7 @@ const getPageBlocksInfo = async (docRef: DocumentRef): Promise<PageBlockInfo[]> 
   return pageBlocks;
 };
 
-// 获取所有不友好块的 ID 列表
+// 获取所有问题块的 ID 列表
 const getUnfriendlyBlockIds = async (docRef: DocumentRef): Promise<string[]> => {
   const blockSnapshot = await DocMiniApp.Document.getRootBlock(docRef);
   const unfriendlyIds: string[] = [];
@@ -261,6 +264,31 @@ const getUnfriendlyBlockIds = async (docRef: DocumentRef): Promise<string[]> => 
 
   await traverseBlocks(blockSnapshot);
   return unfriendlyIds;
+};
+
+// 获取表格统计（收集所有表格ID）
+const getTableMergeStats = async (docRef: DocumentRef): Promise<TableStatsResult> => {
+  const blockSnapshot = await DocMiniApp.Document.getRootBlock(docRef);
+  const tableIds: string[] = [];
+
+  const traverseBlocks = async (block: BlockSnapshot): Promise<void> => {
+    // 检查是否为表格块
+    if (block.type === BlockType.TABLE) {
+      tableIds.push(block.id);
+    }
+
+    // 递归遍历子块
+    for (const childSnapshot of block.childSnapshots) {
+      await traverseBlocks(childSnapshot);
+    }
+  };
+
+  await traverseBlocks(blockSnapshot);
+
+  return {
+    totalTables: tableIds.length,
+    tableIds: tableIds
+  };
 };
 
 // 获取块类型的中文名称
@@ -304,7 +332,7 @@ const getBlockTypeName = (type: string): string => {
     [BlockType.COLUMN_SET]: '列集',
     [BlockType.FLOW]: '流程',
     [BlockType.CHART]: '图表',
-    // 不友好块类型
+    // 问题块类型
     'heading': '标题（包含1~5级标题）',
     'unfriendly_heading': '不友好标题（包含6~9级标题）',
     'iframe': '内嵌网页',
@@ -314,6 +342,7 @@ const getBlockTypeName = (type: string): string => {
     'whiteboard': '白板（包含脑图、画板、流程图等）',
     'agenda': '议程（包含议程、议程项、标题、内容）',
     'ai_template': 'AI模板',
+    'fallback': '降级块（无权限或文档已删除的云文档引用）',
     'undefined': '未知类型',
   };
   return typeNames[type] || type;
@@ -333,12 +362,23 @@ interface TokenCountResult {
   total: number;
 }
 
+// 表格统计结果接口
+interface TableStatsResult {
+  totalTables: number;
+  tableIds: string[]; // 表格ID列表
+}
+
 export default () => {
   const [wordCount, setWordCount] = useState<WordCountResult>({ friendly: 0, unfriendly: 0, total: 0 });
   const [tokenCount, setTokenCount] = useState<TokenCountResult>({ friendly: 0, unfriendly: 0, total: 0 });
   const [blockStats, setBlockStats] = useState<BlockCountResult | null>(null);
   const [pageBlocks, setPageBlocks] = useState<PageBlockInfo[]>([]);
+  const [tableStats, setTableStats] = useState<TableStatsResult | null>(null);
   const [currentUnfriendlyIndex, setCurrentUnfriendlyIndex] = useState<number>(0);
+  const [currentTableIndex, setCurrentTableIndex] = useState<number>(0);
+  const [friendlyExpanded, setFriendlyExpanded] = useState<boolean>(false);
+  const [unfriendlyExpanded, setUnfriendlyExpanded] = useState<boolean>(false);
+  const [tableExpanded, setTableExpanded] = useState<boolean>(false);
   const interval = useRef<number>(new Date().getTime());
   const docRef = useRef<DocumentRef>(null);
   const unfriendlyBlockIds = useRef<string[]>([]);
@@ -367,7 +407,13 @@ export default () => {
     setPageBlocks(pages);
   }, []);
 
-  // 跳转到下一个不友好块
+  // 计算表格合并单元格统计
+  const computeTableStats = useCallback(async (docRef: DocumentRef) => {
+    const stats = await getTableMergeStats(docRef);
+    setTableStats(stats);
+  }, []);
+
+  // 跳转到下一个问题块
   const scrollToNextUnfriendly = useCallback(async () => {
     if (!docRef.current || unfriendlyBlockIds.current.length === 0) return;
 
@@ -378,6 +424,18 @@ export default () => {
     // 下一个，循环
     setCurrentUnfriendlyIndex((prev) => (prev + 1) % unfriendlyBlockIds.current.length);
   }, [currentUnfriendlyIndex]);
+
+  // 跳转到下一个表格
+  const scrollToNextTable = useCallback(async () => {
+    if (!docRef.current || !tableStats || tableStats.tableIds.length === 0) return;
+
+    const currentId = tableStats.tableIds[currentTableIndex];
+    const blockRef = await DocMiniApp.getBlockRefById(docRef.current, currentId);
+    DocMiniApp.Viewport.scrollToBlock(blockRef, true);
+
+    // 下一个，循环
+    setCurrentTableIndex((prev) => (prev + 1) % tableStats.tableIds.length);
+  }, [currentTableIndex, tableStats]);
 
   const INTERVAL = 16;
 
@@ -393,6 +451,7 @@ export default () => {
           computeTokenCount(docRef.current);
           computeBlockStats(docRef.current);
           computePageBlocks(docRef.current);
+          computeTableStats(docRef.current);
           interval.current = now;
         }
       });
@@ -401,7 +460,8 @@ export default () => {
       computeTokenCount(docRef.current);
       computeBlockStats(docRef.current);
       computePageBlocks(docRef.current);
-      // 获取不友好块ID列表
+      computeTableStats(docRef.current);
+      // 获取问题块ID列表
       unfriendlyBlockIds.current = await getUnfriendlyBlockIds(docRef.current);
     })();
     return () => {
@@ -413,15 +473,18 @@ export default () => {
 
   return (
     <div className="wordcount-demo">
-      {/* 头部：左侧组件名，右侧统计 */}
+      {/* 头部:左侧组件名,右侧统计 */}
       <div className="header">
-        <div className="app-name">Sofunny 飞书云文档检查器</div>
+        <div className="title-section">
+          <div className="app-name">Sofunny 飞书云文档检查器</div>
+          <span className="app-version">v{process.env.APP_VERSION || '0.0.0'}</span>
+        </div>
         <div className="header-stats">
           <span className="stat-item">
-            文档字数：<span className="count">{wordCount.total}</span>
+            文档字数:<span className="count">{wordCount.total}</span>
           </span>
           <span className="stat-item">
-            预估 Token：<span className="count">{tokenCount.total}</span>
+            预估 Token:<span className="count">{tokenCount.total}</span>
           </span>
         </div>
       </div>
@@ -431,51 +494,94 @@ export default () => {
         {/* 左侧：友好块 */}
         {blockStats && (
           <div className="stats-column block-stats">
-            <div className="stats-header">
-              <h3>友好块：{Object.entries(blockStats.byType).filter(([type]) => !UNFRIENDLY_BLOCK_TYPES.includes(type)).reduce((sum, [, count]) => sum + count, 0)}</h3>
+            <div className="stats-header" onClick={() => setFriendlyExpanded(!friendlyExpanded)} style={{ cursor: 'pointer' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="expand-icon">{friendlyExpanded ? '▼' : '▶'}</span>
+                <h3 style={{ margin: 0 }}>友好块：{Object.entries(blockStats.byType).filter(([type]) => !UNFRIENDLY_BLOCK_TYPES.includes(type)).reduce((sum, [, count]) => sum + count, 0)}</h3>
+              </div>
             </div>
-            <div className="stats-body">
-              <ul className="block-list">
-                {Object.entries(blockStats.byType)
-                  .filter(([type]) => !UNFRIENDLY_BLOCK_TYPES.includes(type))
-                  .sort(([, a], [, b]) => b - a)
-                  .map(([type, count]) => (
-                    <li key={type}>
-                      {getBlockTypeName(type)}: <span className="count">{count}</span>
-                    </li>
-                  ))}
-                {Object.keys(blockStats.byType).filter(type => !UNFRIENDLY_BLOCK_TYPES.includes(type)).length === 0 && (
-                  <li className="no-data">无</li>
-                )}
-              </ul>
-            </div>
+            {friendlyExpanded && (
+              <div className="stats-body">
+                <ul className="block-list">
+                  {Object.entries(blockStats.byType)
+                    .filter(([type]) => !UNFRIENDLY_BLOCK_TYPES.includes(type))
+                    .sort(([, a], [, b]) => b - a)
+                    .map(([type, count]) => (
+                      <li key={type}>
+                        {getBlockTypeName(type)}: <span className="count">{count}</span>
+                      </li>
+                    ))}
+                  {Object.keys(blockStats.byType).filter(type => !UNFRIENDLY_BLOCK_TYPES.includes(type)).length === 0 && (
+                    <li className="no-data">无</li>
+                  )}
+                </ul>
+              </div>
+            )}
           </div>
         )}
 
-        {/* 右侧：不友好块 */}
+        {/* 右侧：问题块 */}
         {blockStats && (
           <div className="stats-column page-blocks">
             <div className="stats-header">
-              <h3>不友好块：{Object.entries(blockStats.byType).filter(([type]) => UNFRIENDLY_BLOCK_TYPES.includes(type)).reduce((sum, [, count]) => sum + count, 0)}</h3>
-              <button className="scroll-btn" onClick={scrollToNextUnfriendly}>
-                跳转
-              </button>
-            </div>
-            <div className="stats-body">
-              <ul className="block-list">
-                {Object.entries(blockStats.byType)
-                  .filter(([type]) => UNFRIENDLY_BLOCK_TYPES.includes(type))
-                  .sort(([, a], [, b]) => b - a)
-                  .map(([type, count]) => (
-                    <li key={type}>
-                      {getBlockTypeName(type)}: <span className="count">{count}</span>
-                    </li>
-                  ))}
-                {Object.keys(blockStats.byType).filter(type => UNFRIENDLY_BLOCK_TYPES.includes(type)).length === 0 && (
-                  <li className="no-data">无</li>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={() => setUnfriendlyExpanded(!unfriendlyExpanded)}>
+                  <span className="expand-icon">{unfriendlyExpanded ? '▼' : '▶'}</span>
+                  <h3 style={{ margin: 0 }}>问题块：{Object.entries(blockStats.byType).filter(([type]) => UNFRIENDLY_BLOCK_TYPES.includes(type)).reduce((sum, [, count]) => sum + count, 0)}</h3>
+                </div>
+                {Object.entries(blockStats.byType).filter(([type]) => UNFRIENDLY_BLOCK_TYPES.includes(type)).reduce((sum, [, count]) => sum + count, 0) > 0 && (
+                  <button className="scroll-btn" onClick={scrollToNextUnfriendly}>
+                    跳转
+                  </button>
                 )}
-              </ul>
+              </div>
             </div>
+            {unfriendlyExpanded && (
+              <div className="stats-body">
+                <ul className="block-list">
+                  {Object.entries(blockStats.byType)
+                    .filter(([type]) => UNFRIENDLY_BLOCK_TYPES.includes(type))
+                    .sort(([, a], [, b]) => b - a)
+                    .map(([type, count]) => (
+                      <li key={type}>
+                        {getBlockTypeName(type)}: <span className="count">{count}</span>
+                      </li>
+                    ))}
+                  {Object.keys(blockStats.byType).filter(type => UNFRIENDLY_BLOCK_TYPES.includes(type)).length === 0 && (
+                    <li className="no-data">无</li>
+                  )}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 表格统计 */}
+        {tableStats && (
+          <div className="stats-column table-stats">
+            <div className="stats-header">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={() => setTableExpanded(!tableExpanded)}>
+                  <span className="expand-icon">{tableExpanded ? '▼' : '▶'}</span>
+                  <h3 style={{ margin: 0 }}>表格：{tableStats.totalTables}</h3>
+                </div>
+                {tableStats.totalTables > 0 && (
+                  <button className="scroll-btn" onClick={scrollToNextTable}>
+                    跳转
+                  </button>
+                )}
+              </div>
+            </div>
+            {tableExpanded && (
+              <div className="stats-body">
+                <div className="table-summary">
+                  <div className="summary-item">
+                    <span className="summary-label">表格总数:</span>
+                    <span className="count">{tableStats.totalTables}</span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
