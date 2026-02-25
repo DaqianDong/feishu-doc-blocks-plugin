@@ -440,12 +440,27 @@ export default () => {
 
       // 获取第一个选中项
       const firstItem = selectionItems[0];
+      const blockSnapshot = firstItem.blockSnapshot;
+      const blockType = blockSnapshot?.type || 'unknown';
+
+      // 特殊处理：画板类型
+      if (blockType === 'whiteboard' || blockType === BlockType.WHITEBOARD) {
+        const whiteboardId = blockSnapshot?.data?.whiteboard_id || blockSnapshot?.data?.token || firstItem.blockId;
+
+        setSelectedBlock({
+          blockId: firstItem.blockId,
+          blockType: blockType,
+          text: `[画板内容无法直接读取]\n画板 ID: ${whiteboardId}`,
+          hasError: false
+        });
+        return;
+      }
 
       // ExtendedSelectionItem 已经包含 blockSnapshot，直接使用
       setSelectedBlock({
         blockId: firstItem.blockId,
-        blockType: firstItem.blockSnapshot?.type || 'unknown',
-        text: firstItem.blockSnapshot?.data?.plain_text || '',
+        blockType: blockType,
+        text: blockSnapshot?.data?.plain_text || '',
         hasError: false
       });
     } catch (error) {
