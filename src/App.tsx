@@ -28,8 +28,10 @@ const getDocumentWordCount = async (docRef: DocumentRef) => {
   const traverseBlocks = async (block: BlockSnapshot): Promise<void> => {
     // 忽略的块类型不统计
     if (IGNORED_BLOCK_TYPES.includes(block.type)) {
-      for (const childSnapshot of block.childSnapshots) {
-        await traverseBlocks(childSnapshot);
+      if (block.childSnapshots) {
+        for (const childSnapshot of block.childSnapshots) {
+          await traverseBlocks(childSnapshot);
+        }
       }
       return;
     }
@@ -46,8 +48,10 @@ const getDocumentWordCount = async (docRef: DocumentRef) => {
       }
     }
 
-    for (const blockChildSnapshot of block.childSnapshots) {
-      await traverseBlocks(blockChildSnapshot);
+    if (block.childSnapshots) {
+      for (const blockChildSnapshot of block.childSnapshots) {
+        await traverseBlocks(blockChildSnapshot);
+      }
     }
   };
 
@@ -87,11 +91,11 @@ const getDocumentTokenCount = async (docRef: DocumentRef) => {
     const normalizedType = normalizeBlockType(block.type);
     const isUnfriendly = UNFRIENDLY_BLOCK_TYPES.includes(normalizedType);
 
-    if (isTextualBlock(block) && blockSnapshot.data?.plain_text) {
+    if (isTextualBlock(block) && block.data?.plain_text) {
       if (isUnfriendly) {
-        unfriendlyText += blockSnapshot.data.plain_text;
+        unfriendlyText += block.data.plain_text;
       } else {
-        friendlyText += blockSnapshot.data.plain_text;
+        friendlyText += block.data.plain_text;
       }
     }
 
@@ -368,6 +372,15 @@ interface TableStatsResult {
   tableIds: string[]; // 表格ID列表
 }
 
+// 选中块信息接口
+interface SelectedBlockInfo {
+  blockId: string;           // 块的唯一标识符
+  blockType: string;         // 块类型（如 'text', 'heading1' 等）
+  text: string;              // 块的纯文本内容
+  hasError: boolean;         // 是否获取失败
+  errorMessage?: string;     // 错误信息
+}
+
 export default () => {
   const [wordCount, setWordCount] = useState<WordCountResult>({ friendly: 0, unfriendly: 0, total: 0 });
   const [tokenCount, setTokenCount] = useState<TokenCountResult>({ friendly: 0, unfriendly: 0, total: 0 });
@@ -379,6 +392,8 @@ export default () => {
   const [friendlyExpanded, setFriendlyExpanded] = useState<boolean>(false);
   const [unfriendlyExpanded, setUnfriendlyExpanded] = useState<boolean>(false);
   const [tableExpanded, setTableExpanded] = useState<boolean>(false);
+  const [selectedBlock, setSelectedBlock] = useState<SelectedBlockInfo | null>(null);
+  const [debugPanelExpanded, setDebugPanelExpanded] = useState<boolean>(true);
   const interval = useRef<number>(new Date().getTime());
   const docRef = useRef<DocumentRef>(null);
   const unfriendlyBlockIds = useRef<string[]>([]);
@@ -411,6 +426,38 @@ export default () => {
   const computeTableStats = useCallback(async (docRef: DocumentRef) => {
     const stats = await getTableMergeStats(docRef);
     setTableStats(stats);
+  }, []);
+
+  // 获取选中块信息
+  const fetchSelectedBlockInfo = useCallback(async (docRef: DocumentRef) => {
+    try {
+      const selectionItems = await DocMiniApp.Selection.getSelection(docRef);
+
+      if (!selectionItems || selectionItems.length === 0) {
+        setSelectedBlock(null);
+        return;
+      }
+
+      // 获取第一个选中项
+      const firstItem = selectionItems[0];
+
+      // ExtendedSelectionItem 已经包含 blockSnapshot，直接使用
+      setSelectedBlock({
+        blockId: firstItem.blockId,
+        blockType: firstItem.blockSnapshot?.type || 'unknown',
+        text: firstItem.blockSnapshot?.data?.plain_text || '',
+        hasError: false
+      });
+    } catch (error) {
+      console.error('fetchSelectedBlockInfo 错误:', error);
+      setSelectedBlock({
+        blockId: '',
+        blockType: '',
+        text: '',
+        hasError: true,
+        errorMessage: error.message || String(error)
+      });
+    }
   }, []);
 
   // 跳转到下一个问题块
@@ -452,6 +499,7 @@ export default () => {
           computeBlockStats(docRef.current);
           computePageBlocks(docRef.current);
           computeTableStats(docRef.current);
+          fetchSelectedBlockInfo(docRef.current);
           interval.current = now;
         }
       });
@@ -461,6 +509,7 @@ export default () => {
       computeBlockStats(docRef.current);
       computePageBlocks(docRef.current);
       computeTableStats(docRef.current);
+      fetchSelectedBlockInfo(docRef.current);
       // 获取问题块ID列表
       unfriendlyBlockIds.current = await getUnfriendlyBlockIds(docRef.current);
     })();
@@ -581,6 +630,42 @@ export default () => {
                   </div>
                 </div>
               </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 调试面板 - 放在最下方 */}
+      <div className="debug-panel">
+        <div className="debug-header" onClick={() => setDebugPanelExpanded(!debugPanelExpanded)}>
+          <span className="expand-icon">{debugPanelExpanded ? '▼' : '▶'}</span>
+          <h3>选中块调试信息</h3>
+        </div>
+        {debugPanelExpanded && (
+          <div className="debug-content">
+            {selectedBlock ? (
+              selectedBlock.hasError ? (
+                <div className="debug-error">错误: {selectedBlock.errorMessage}</div>
+              ) : (
+                <div className="debug-info">
+                  <div className="debug-row">
+                    <span className="debug-label">块 ID:</span>
+                    <span className="debug-value">{selectedBlock.blockId}</span>
+                  </div>
+                  <div className="debug-row">
+                    <span className="debug-label">块类型:</span>
+                    <span className="debug-value">{selectedBlock.blockType}</span>
+                  </div>
+                  <div className="debug-row">
+                    <span className="debug-label">文本内容:</span>
+                  </div>
+                  <div className="debug-text-content">
+                    {selectedBlock.text || '<空>'}
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="debug-empty">未选中任何块</div>
             )}
           </div>
         )}
