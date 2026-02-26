@@ -445,12 +445,34 @@ export default () => {
 
       // 特殊处理：画板类型
       if (blockType === 'whiteboard' || blockType === BlockType.WHITEBOARD) {
-        const whiteboardId = blockSnapshot?.data?.whiteboard_id || blockSnapshot?.data?.token || firstItem.blockId;
+        // 请求服务器
+        const fetchData = async () => {
+          const url = new URL('http://localhost:8081/whiteboard');
+          url.searchParams.append('documentId', docRef.docToken);
+          url.searchParams.append('recordId', blockSnapshot.recordId);
+
+          var res = "";
+          try {
+            const response = await fetch(url.toString());
+            if (!response.ok) throw new Error('网络响应不正常');
+            var data = await response.json();
+            if (data.Code != 0) {
+              res = data.Message;
+            } else {
+              res = data.Data;
+            }
+          } catch (err) {
+            console.error(err);
+            res = JSON.stringify(err);
+          }
+
+          return res;
+        };
 
         setSelectedBlock({
           blockId: firstItem.blockId,
           blockType: blockType,
-          text: `[画板内容无法直接读取]\n画板 ID: ${whiteboardId}`,
+          text: await fetchData(),
           hasError: false
         });
         return;
