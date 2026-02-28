@@ -447,7 +447,7 @@ export default () => {
       if (blockType === 'whiteboard' || blockType === BlockType.WHITEBOARD) {
         // 请求服务器
         const fetchData = async () => {
-          const url = new URL('http://localhost:8081/whiteboard');
+          const url = new URL('http://10.30.40.95:8081/whiteboard');
           url.searchParams.append('documentId', docRef.docToken);
           url.searchParams.append('recordId', blockSnapshot.recordId);
 
